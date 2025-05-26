@@ -53,13 +53,28 @@ NEUTRAL_ARROW = "➖"
 @st.cache_data(ttl=600) 
 def load_data(sheet_key):
     try:
-        creds = Credentials.from_service_account_file(
-            'creds.json',
-            scopes=[
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive.readonly'
-            ]
-        )
+        # Check if running in Streamlit Cloud and secrets are available
+        if hasattr(st, 'secrets') and "gcp_service_account" in st.secrets:
+            creds_dict = st.secrets["gcp_service_account"]
+            creds = Credentials.from_service_account_info(
+                creds_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets.readonly',
+                    'https://www.googleapis.com/auth/drive.readonly'
+                ]
+            )
+            # st.sidebar.info("Using credentials from Streamlit Secrets.") # Optional: for debugging deployment
+        else:
+            # Fallback to local creds.json file
+            creds = Credentials.from_service_account_file(
+                'creds.json',
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets.readonly',
+                    'https://www.googleapis.com/auth/drive.readonly'
+                ]
+            )
+            # st.sidebar.info("Using local creds.json file.") # Optional: for local debugging
+
         gc = gspread.authorize(creds)
         spreadsheet = gc.open_by_key(sheet_key)
         sheet = spreadsheet.get_worksheet(0)
@@ -73,14 +88,17 @@ def load_data(sheet_key):
         df.replace('', np.nan, inplace=True) 
         return df
 
-    except FileNotFoundError:
-        st.error("Error: `creds.json` not found. Please ensure the service account file is in the correct location.")
+    except FileNotFoundError: # Specifically for local creds.json
+        st.error("Error: `creds.json` not found for local execution. If deployed, ensure Streamlit Secrets are set.")
         return pd.DataFrame()
     except gspread.exceptions.SpreadsheetNotFound:
         st.error(f"Error: Spreadsheet with key '{sheet_key}' not found. Please verify the Google Sheet key.")
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"An error occurred while fetching data: {e}")
+    except Exception as e: # Catch other potential errors, including auth errors with st.secrets
+        st.error(f"An error occurred while fetching/processing data: {e}")
+        # If it's an auth error from st.secrets, e might contain a tuple like ('invalid_grant:...')
+        if isinstance(e, tuple) and len(e) > 0 and 'invalid_grant' in str(e[0]):
+             st.error("This looks like an authentication error with Google. If deployed, please double-check your Streamlit Secrets for the 'gcp_service_account' and ensure they are correctly formatted in TOML. Regenerating your service account key might be necessary.")
         return pd.DataFrame()
 
 SPREADSHEET_KEY = '1UX1sHkfhJiW0jofPl6W8DCQoeMDoBHtmBFy44mHc9mU'
@@ -151,11 +169,11 @@ fee_col = fee_col_actual
 
 # Adjust identified percentage columns to be decimals
 if franchise_fee_pct_col_actual and franchise_fee_pct_col_actual in df_processed.columns and pd.api.types.is_numeric_dtype(df_processed[franchise_fee_pct_col_actual]):
-    if (df_processed[franchise_fee_pct_col_actual] > 1).any(): # Check if values are likely whole numbers
+    if (df_processed[franchise_fee_pct_col_actual] > 1).any(): 
         df_processed[franchise_fee_pct_col_actual] = df_processed[franchise_fee_pct_col_actual] / 100.0
 
 if profit_target_pct_col_actual and profit_target_pct_col_actual in df_processed.columns and pd.api.types.is_numeric_dtype(df_processed[profit_target_pct_col_actual]):
-    if (df_processed[profit_target_pct_col_actual] > 1).any(): # Check if values are likely whole numbers
+    if (df_processed[profit_target_pct_col_actual] > 1).any(): 
         df_processed[profit_target_pct_col_actual] = df_processed[profit_target_pct_col_actual] / 100.0
 
 
